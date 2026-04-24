@@ -1,0 +1,72 @@
+name: CI - ai-inference-stub
+
+on:
+  push:
+    branches: [main]
+    paths: ["ai-inference-stub/**"]
+  pull_request:
+    paths: ["ai-inference-stub/**"]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ai-inference-stub
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: pytest -v
+
+  build-and-push:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ai-inference-stub
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS creds via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::347486023960:role/gha-ecr-push
+          aws-region: ap-south-1
+      - name: Login to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Set image tag
+        id: meta
+        run: echo "tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - name: Build and push
+        run: |
+          IMG=${{ steps.ecr.outputs.registry }}/ai-inference-stub:${{ steps.meta.outputs.tag }}
+          docker build -t "$IMG" .
+          docker push "$IMG"
+
+  bump-apps-config:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: Yash-Rathod/apps-config
+          token: ${{ secrets.APPS_CONFIG_PAT }}
+          path: apps-config
+      - name: Bump image tag in dev
+        run: |
+          cd apps-config
+          sed -i "s|tag:.*|tag: ${{ needs.build-and-push.outputs.image_tag }}|" envs/dev/ai-inference-stub.yaml
+          git config user.email "ci@baktrack.dev"
+          git config user.name "BakTrack CI"
+          git commit -am "chore(dev): bump ai-inference-stub to ${{ needs.build-and-push.outputs.image_tag }}"
+          git push

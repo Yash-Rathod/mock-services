@@ -1,4 +1,5 @@
 from flask import Flask, jsonify, request
+from prometheus_flask_exporter import PrometheusMetrics
 import logging, os, uuid
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -6,6 +7,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 
 def create_app():
     app = Flask(__name__)
+    PrometheusMetrics(app)
 
     @app.route("/health")
     def health():
